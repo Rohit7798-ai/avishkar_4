@@ -5,22 +5,22 @@
   "rewrites": [
     {
       "source": "/api",
-      "destination": "/api/index.py"
+      "destination": "/api/index.py?__subpath="
     },
     {
       "source": "/api/(.*)",
-      "destination": "/api/index.py"
+      "destination": "/api/index.py?__subpath=$1"
     },
     {
       "source": "/docs",
-      "destination": "/api/index.py"
+      "destination": "/api/index.py?__subpath=docs"
     },
     {
       "source": "/openapi.json",
-      "destination": "/api/index.py"
+      "destination": "/api/index.py?__subpath=openapi.json"
     },
     {
-      "source": "/(.*)",
+      "source": "/((?!assets/).*)",
       "destination": "/index.html"
     }
   ]
