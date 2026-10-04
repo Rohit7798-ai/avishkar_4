@@ -44,6 +44,21 @@ class Settings(BaseSettings):
     # Database configuration pointing to data/farmer_decision.db
     DATABASE_URL: str = DEFAULT_DATABASE_URL
 
+    @field_validator("DATABASE_URL", mode="before")
+    @classmethod
+    def validate_database_url(cls, v: Union[str, None]) -> str:
+        if not v:
+            return DEFAULT_DATABASE_URL
+        if isinstance(v, str):
+            # Normalize legacy postgres:// URI to postgresql:// for SQLAlchemy 2.0 compatibility
+            if v.startswith("postgres://"):
+                v = v.replace("postgres://", "postgresql://", 1)
+            # On Vercel serverless, ensure file SQLite redirects to writable /tmp volume
+            if os.environ.get("VERCEL") and v.startswith("sqlite"):
+                if not v.startswith("sqlite:////tmp") and ":memory:" not in v:
+                    return "sqlite:////tmp/farmer_decision.db"
+        return v
+
     # External Provider Configuration
     OPEN_METEO_BASE_URL: str = "https://api.open-meteo.com/v1"
     OPEN_METEO_TIMEOUT_SECONDS: float = 10.0

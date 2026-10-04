@@ -1,7 +1,9 @@
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse
+from fastapi.staticfiles import StaticFiles
+from pathlib import Path
 
 from app.api import api_router
 from app.core import settings
@@ -40,14 +42,17 @@ def create_application() -> FastAPI:
         # Disallow wildcards in production with credentials
         cors_origins = [o for o in cors_origins if o != "*"]
 
-    if cors_origins:
-        application.add_middleware(
-            CORSMiddleware,
-            allow_origins=cors_origins,
-            allow_credentials=True,
-            allow_methods=["*"],
-            allow_headers=["*"],
-        )
+    # Automatically allow Vercel production and preview deployments
+    cors_regex = r"^https://.*\.vercel\.app$"
+
+    application.add_middleware(
+        CORSMiddleware,
+        allow_origins=cors_origins,
+        allow_origin_regex=cors_regex,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
     # Domain exception handlers preventing SQL or internal leak
     @application.exception_handler(EntityNotFoundException)
@@ -74,6 +79,43 @@ def create_application() -> FastAPI:
 
     # Mount API router under configured prefix (default "/api")
     application.include_router(api_router, prefix=settings.API_V1_STR)
+    # Also mount with empty prefix so whether Vercel preserves or strips /api, all routes resolve
+    if settings.API_V1_STR != "":
+        application.include_router(api_router, prefix="")
+
+    # Serve Frontend Static Files
+    frontend_build_dir = Path(__file__).parent.parent.parent / "frontend" / "dist"
+    
+    if frontend_build_dir.exists():
+        # Mount the assets directory specifically
+        assets_dir = frontend_build_dir / "assets"
+        if assets_dir.exists():
+            application.mount("/assets", StaticFiles(directory=str(assets_dir)), name="assets")
+        
+        # Explicit root endpoint for serving SPA entrypoint
+        @application.get("/", include_in_schema=False)
+        async def serve_root():
+            index_path = frontend_build_dir / "index.html"
+            if index_path.exists():
+                return FileResponse(str(index_path))
+            return JSONResponse(content={"message": "Farmer Decision System API is running."})
+
+        # SPA fallback middleware: handles client-side routing on 404 for non-API GET requests
+        @application.middleware("http")
+        async def spa_fallback_middleware(request: Request, call_next):
+            response = await call_next(request)
+            if response.status_code == 404 and request.method == "GET":
+                path = request.url.path.lstrip("/")
+                if not path.startswith("api") and not path.startswith("docs") and not path.startswith("openapi.json"):
+                    file_path = frontend_build_dir / path
+                    if file_path.is_file():
+                        return FileResponse(str(file_path))
+                    index_path = frontend_build_dir / "index.html"
+                    if index_path.exists():
+                        return FileResponse(str(index_path))
+            return response
+    else:
+        logger.warning(f"Frontend build directory not found at {frontend_build_dir}. Ensure 'npm run build' was executed in the frontend folder.")
 
     return application
 
